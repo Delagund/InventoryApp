@@ -1,16 +1,17 @@
 package cl.cristian.inventoryapp
 
 import android.app.Application
-import com.google.firebase.firestore.FirebaseFirestore
 import cl.cristian.inventoryapp.data.local.AppDatabase
+import cl.cristian.inventoryapp.data.remote.api.InventarioApiService
 import cl.cristian.inventoryapp.data.repository.InventarioRepository
 import cl.cristian.inventoryapp.data.worker.SyncWorker
+import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 
-// Inicializa de forma perezosa (by lazy) la base de datos Room, la instancia de Firestore y el repositorio con un
-// alcance de corrutinas global (SupervisorJob) que sobrevive al cierre de pantallas individuales.
+// Inicializa de forma perezosa (by lazy) la base de datos Room, la instancia de Firestore,
+// el cliente REST Retrofit y el repositorio con un alcance global (SupervisorJob).
 
 class InventarioApplication : Application() {
 
@@ -24,11 +25,16 @@ class InventarioApplication : Application() {
         FirebaseFirestore.getInstance()
     }
 
+    private val apiService: InventarioApiService by lazy {
+        InventarioApiService.create()
+    }
+
     val repository: InventarioRepository by lazy {
         InventarioRepository(
             dao = database.inventarioDao(),
             firestore = firestore,
             externalScope = applicationScope,
+            apiService = apiService,
             onRequiereSincronizacionDiferida = {
                 SyncWorker.encolarSincronizacion(this)
             }

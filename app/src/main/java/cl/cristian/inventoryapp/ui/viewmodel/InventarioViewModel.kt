@@ -11,13 +11,15 @@ import cl.cristian.inventoryapp.data.local.entities.ProductoEntity
 import cl.cristian.inventoryapp.data.local.entities.ProveedorEntity
 import cl.cristian.inventoryapp.data.local.relations.ProductoConProveedor
 import cl.cristian.inventoryapp.data.repository.InventarioRepository
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-// Coordina el ciclo de vida de la sincronización, expone las listas reactivas hacia Compose
-// y ejecuta las operaciones CRUD dentro de viewModelScope.
+// Coordina el ciclo de vida de la sincronización, expone las listas reactivas hacia Compose,
+// gestiona la interoperabilidad REST/JSON y ejecuta las operaciones CRUD dentro de viewModelScope.
 
 class InventarioViewModel(
     private val repository: InventarioRepository
@@ -38,6 +40,12 @@ class InventarioViewModel(
             initialValue = emptyList()
         )
 
+    private val _importandoApi = MutableStateFlow(false)
+    val importandoApi: StateFlow<Boolean> = _importandoApi.asStateFlow()
+
+    private val _mensajeUsuario = MutableStateFlow<String?>(null)
+    val mensajeUsuario: StateFlow<String?> = _mensajeUsuario.asStateFlow()
+
     init {
         iniciarSincronizacion()
     }
@@ -47,6 +55,31 @@ class InventarioViewModel(
         viewModelScope.launch {
             repository.sincronizarPendientesOffline()
         }
+    }
+
+    // --- INTEROPERABILIDAD SERVICIO WEB REST / JSON ---
+    // Si quedaron datos pendientes de una sesión anterior sin red, los encola al iniciar
+
+    fun importarDesdeApiRest() {
+        if (_importandoApi.value) return
+        viewModelScope.launch {
+            _importandoApi.value = true
+            val resultado = repository.importarCatalogoDesdeApi()
+            _importandoApi.value = false
+
+            resultado.fold(
+                onSuccess = { total ->
+                    _mensajeUsuario.value = "API REST: $total registros importados y sincronizados (JSON)"
+                },
+                onFailure = { error ->
+                    _mensajeUsuario.value = "Error al consumir API REST: ${error.localizedMessage ?: "Verifica tu conexión"}"
+                }
+            )
+        }
+    }
+
+    fun limpiarMensaje() {
+        _mensajeUsuario.value = null
     }
 
     // --- OPERACIONES CRUD: PROVEEDOR ---

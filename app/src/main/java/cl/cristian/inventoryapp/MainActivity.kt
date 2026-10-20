@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
@@ -38,13 +39,31 @@ class MainActivity : ComponentActivity() {
 fun InventarioAppPrincipal(viewModel: InventarioViewModel) {
     val productosConProveedor by viewModel.productosConProveedor.collectAsState()
     val proveedores by viewModel.proveedores.collectAsState()
+    val importandoApi by viewModel.importandoApi.collectAsState()
+    val mensajeUsuario by viewModel.mensajeUsuario.collectAsState()
+
+    val snackbarHostState = remember { SnackbarHostState() }
     var tabSeleccionada by remember { mutableIntStateOf(0) }
 
+    LaunchedEffect(mensajeUsuario) {
+        mensajeUsuario?.let { msg ->
+            snackbarHostState.showSnackbar(msg)
+            viewModel.limpiarMensaje()
+        }
+    }
+
     Scaffold(
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("Control de Inventario") },
                 actions = {
+                    TextButton(
+                        onClick = { viewModel.importarDesdeApiRest() },
+                        enabled = !importandoApi
+                    ) {
+                        Text(if (importandoApi) "Cargando..." else "Importar API")
+                    }
                     IconButton(onClick = { viewModel.iniciarSincronizacion() }) {
                         Icon(
                             imageVector = Icons.Default.Refresh,
@@ -60,6 +79,10 @@ fun InventarioAppPrincipal(viewModel: InventarioViewModel) {
                 .fillMaxSize()
                 .padding(padding)
         ) {
+            if (importandoApi) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+
             PrimaryTabRow(selectedTabIndex = tabSeleccionada) {
                 Tab(
                     selected = tabSeleccionada == 0,

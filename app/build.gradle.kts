@@ -3,9 +3,8 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
     alias(libs.plugins.androidx.room3)
-    id("org.jetbrains.kotlin.plugin.serialization")
-    id("com.google.gms.google-services")
-
+    alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.google.services)
 }
 
 android {
@@ -67,8 +66,9 @@ dependencies {
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.firestore)
 
-    // Interoperabilidad futura: API REST y JSON
+    // Interoperabilidad: API REST y JSON
     implementation(libs.retrofit)
+    implementation(libs.okhttp)
     implementation(libs.converter.kotlinx.serialization)
     implementation(libs.kotlinx.serialization.json)
 

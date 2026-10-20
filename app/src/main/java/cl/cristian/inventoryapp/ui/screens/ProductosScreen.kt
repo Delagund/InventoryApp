@@ -6,8 +6,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -18,8 +20,8 @@ import cl.cristian.inventoryapp.data.local.entities.ProductoEntity
 import cl.cristian.inventoryapp.data.local.entities.ProveedorEntity
 import cl.cristian.inventoryapp.data.local.relations.ProductoConProveedor
 
-// Implementa el CRUD completo de productos e incluye un selector desplegable (ExposedDropdownMenuBox)
-// para vincular el ProveedorEntity correspondiente al crear o editar un producto.
+// Implementa el CRUD completo de productos, barra de búsqueda y filtrado en tiempo real,
+// y selector desplegable (ExposedDropdownMenuBox) para vincular el ProveedorEntity.
 
 @Composable
 fun ProductosScreen(
@@ -30,6 +32,20 @@ fun ProductosScreen(
 ) {
     var mostrarDialogo by remember { mutableStateOf(false) }
     var productoAEditar by remember { mutableStateOf<ProductoEntity?>(null) }
+    var filtroBusqueda by remember { mutableStateOf("") }
+
+    val productosFiltrados = remember(productosConProveedor, filtroBusqueda) {
+        if (filtroBusqueda.isBlank()) {
+            productosConProveedor
+        } else {
+            val query = filtroBusqueda.trim().lowercase()
+            productosConProveedor.filter { item ->
+                item.producto.nombre.lowercase().contains(query) ||
+                        item.producto.codigoBarras.lowercase().contains(query) ||
+                        (item.proveedor?.nombre?.lowercase()?.contains(query) == true)
+            }
+        }
+    }
 
     Scaffold(
         floatingActionButton = {
@@ -41,67 +57,90 @@ fun ProductosScreen(
             }
         }
     ) { padding ->
-        if (productosConProveedor.isEmpty()) {
-            Box(
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
+            OutlinedTextField(
+                value = filtroBusqueda,
+                onValueChange = { filtroBusqueda = it },
+                label = { Text("Buscar por nombre, código o proveedor") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Buscar") },
+                trailingIcon = {
+                    if (filtroBusqueda.isNotEmpty()) {
+                        IconButton(onClick = { filtroBusqueda = "" }) {
+                            Icon(Icons.Default.Clear, contentDescription = "Limpiar búsqueda")
+                        }
+                    }
+                },
+                singleLine = true,
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("No hay productos en el inventario.")
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(productosConProveedor, key = { it.producto.id }) { item ->
-                    val prod = item.producto
-                    val nombreProveedor = item.proveedor?.nombre ?: "Proveedor en sincronización / no asignado"
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            )
 
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = prod.nombre,
-                                    style = MaterialTheme.typography.titleMedium
-                                )
-                                Text(
-                                    text = "Código de barras: ${prod.codigoBarras}",
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                                Text(
-                                    text = "Precio: $${prod.precio} | Stock: ${prod.stock}",
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                                Text(
-                                    text = "Proveedor: $nombreProveedor",
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                                Text(
-                                    text = if (prod.isSynced) "Sincronizado" else "Pendiente offline",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (prod.isSynced) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-                                )
-                            }
-                            Row {
-                                IconButton(onClick = {
-                                    productoAEditar = prod
-                                    mostrarDialogo = true
-                                }) {
-                                    Icon(Icons.Default.Edit, contentDescription = "Editar")
+            if (productosFiltrados.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        if (productosConProveedor.isEmpty()) "No hay productos en el inventario."
+                        else "No se encontraron coincidencias para \"$filtroBusqueda\"."
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(productosFiltrados, key = { it.producto.id }) { item ->
+                        val prod = item.producto
+                        val nombreProveedor = item.proveedor?.nombre ?: "Proveedor en sincronización / no asignado"
+
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = prod.nombre,
+                                        style = MaterialTheme.typography.titleMedium
+                                    )
+                                    Text(
+                                        text = "Código de barras: ${prod.codigoBarras}",
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                    Text(
+                                        text = "Precio: $${prod.precio} | Stock: ${prod.stock}",
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    Text(
+                                        text = "Proveedor: $nombreProveedor",
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                    Text(
+                                        text = if (prod.isSynced) "Sincronizado" else "Pendiente offline",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (prod.isSynced) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                                    )
                                 }
-                                IconButton(onClick = { onEliminarProducto(prod) }) {
-                                    Icon(Icons.Default.Delete, contentDescription = "Eliminar")
+                                Row {
+                                    IconButton(onClick = {
+                                        productoAEditar = prod
+                                        mostrarDialogo = true
+                                    }) {
+                                        Icon(Icons.Default.Edit, contentDescription = "Editar")
+                                    }
+                                    IconButton(onClick = { onEliminarProducto(prod) }) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Eliminar")
+                                    }
                                 }
                             }
                         }

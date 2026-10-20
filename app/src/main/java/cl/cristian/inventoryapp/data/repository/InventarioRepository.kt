@@ -1,26 +1,31 @@
 package cl.cristian.inventoryapp.data.repository
 
-import com.google.firebase.firestore.DocumentChange
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.ListenerRegistration
 import cl.cristian.inventoryapp.data.local.dao.InventarioDao
 import cl.cristian.inventoryapp.data.local.entities.ProductoEntity
 import cl.cristian.inventoryapp.data.local.entities.ProveedorEntity
 import cl.cristian.inventoryapp.data.local.relations.ProductoConProveedor
+import cl.cristian.inventoryapp.data.remote.api.InventarioApiService
+import cl.cristian.inventoryapp.data.remote.dto.toEntity
+import com.google.firebase.firestore.DocumentChange
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 
-// implementación completa con soporte CRUD para Producto y Proveedor,
-// con escucha bidireccional en tiempo real y vaciado de cola offline.
+// Implementación completa con soporte CRUD para Producto y Proveedor,
+// escucha bidireccional en tiempo real, vaciado de cola offline e interoperabilidad REST/JSON.
 
 class InventarioRepository(
     private val dao: InventarioDao,
     private val firestore: FirebaseFirestore,
     private val externalScope: CoroutineScope,
+    private val apiService: InventarioApiService = InventarioApiService.create(),
     private val onRequiereSincronizacionDiferida: () -> Unit = {} // Callback hacia WorkManager
 ) {
     private val colProductos = firestore.collection("productos")
@@ -247,6 +252,64 @@ class InventarioRepository(
                     dao.upsertProducto(prod.copy(isSynced = true))
                 }
             } catch (_: Exception) { }
+        }
+    }
+
+    // =========================================================================
+    // 5. INTEROPERABILIDAD REST / JSON (API -> ROOM -> FIRESTORE)
+    // =========================================================================
+
+    /**
+     * Descarga el catálogo desde los endpoints REST en paralelo, aplica resolución
+     * de conflictos Last-Write-Wins contra SQLite (SSOT) y propaga a Firestore.
+     *
+     * @return Result con la cantidad total de registros (proveedores + productos) procesados.
+     */
+    suspend fun importarCatalogoDesdeApi(): Result<Int> = withContext(Dispatchers.IO) {
+        runCatching {
+            // 1. Peticiones HTTP GET concurrentes hacia ambos endpoints JSON
+            val (proveedoresDto, productosDto) = coroutineScope {
+                val deferredProveedores = async { apiService.obtenerProveedores() }
+                val deferredProductos = async { apiService.obtenerProductos() }
+                deferredProveedores.await() to deferredProductos.await()
+            }
+
+            var registrosActualizados = 0
+
+            // 2. Insertar/Actualizar Proveedores primero (integridad referencial)
+            for (dto in proveedoresDto) {
+                val local = dao.obtenerProveedorPorId(dto.id)
+                if (local == null || dto.updatedAt >= local.updatedAt) {
+                    // Se guarda con isSynced = false para que suba a Firestore en el paso 4
+                    dao.upsertProveedor(dto.toEntity(isSynced = false))
+                    registrosActualizados++
+                }
+            }
+
+            // 3. Insertar/Actualizar Productos
+            for (dto in productosDto) {
+                val local = dao.obtenerProductoPorId(dto.id)
+                if (local == null || dto.updatedAt >= local.updatedAt) {
+                    dao.upsertProducto(dto.toEntity(isSynced = false))
+                    registrosActualizados++
+                }
+            }
+
+            // 4. Empujar los nuevos registros locales hacia Cloud Firestore
+            try {
+                sincronizarPendientesOffline()
+            } catch (_: Exception) {
+                onRequiereSincronizacionDiferida()
+            }
+
+            // Si algún registro quedó pendiente por red inestable, encolamos WorkManager
+            if (dao.obtenerProveedoresPendientes().isNotEmpty() ||
+                dao.obtenerProductosPendientes().isNotEmpty()
+            ) {
+                onRequiereSincronizacionDiferida()
+            }
+
+            registrosActualizados
         }
     }
 }
